@@ -11,3 +11,4 @@ transactions = db.transactions
 
 # Create only once; MongoDB ignores it if it already exists.
 transactions.create_index("transaction_id", unique=True)
+imports = db["imports"]

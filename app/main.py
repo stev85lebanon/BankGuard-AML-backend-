@@ -7,14 +7,14 @@ import csv
 from io import StringIO
 from app.models import Transaction
 from app.risk_engine import calculate_risk
-from app.database import transactions
+from app.database import transactions,imports
 from typing import Optional
 from fastapi import Query
 from fastapi import HTTPException
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-
+from datetime import datetime
 app = FastAPI(title="BankGuard AML")
 
 app.add_middleware(
@@ -221,6 +221,16 @@ async def import_transactions(file: UploadFile = File(...)):
             imported += 1
         except DuplicateKeyError:
             duplicates += 1
+
+    # Save import history (outside the loop)
+    imports.insert_one({
+        "file_name": file.filename,
+        "imported": imported,
+        "duplicates": duplicates,
+        "total_rows": imported + duplicates,
+        "status": "Completed",
+        "created_at": datetime.utcnow(),
+    })
 
     return {
         "imported": imported,
