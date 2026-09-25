@@ -2,7 +2,9 @@ from typing import List
 
 from fastapi import FastAPI, HTTPException, status
 from pymongo.errors import DuplicateKeyError
-
+from fastapi import UploadFile, File
+import csv
+from io import StringIO
 from app.models import Transaction
 from app.risk_engine import calculate_risk
 from app.database import transactions
@@ -184,4 +186,43 @@ def delete_transaction(transaction_id: str):
 
     return {
         "message": f"Transaction {transaction_id} deleted successfully."
+    }
+@app.post("/transactions/import")
+async def import_transactions(file: UploadFile = File(...)):
+
+    content = await file.read()
+    csv_text = content.decode("utf-8")
+
+    reader = csv.DictReader(StringIO(csv_text))
+
+    imported = 0
+    duplicates = 0
+
+    for row in reader:
+        transaction = Transaction(
+            transaction_id=row["transaction_id"],
+            customer_id=row["customer_id"],
+            amount=float(row["amount"]),
+            country=row["country"],
+            merchant=row["merchant"],
+            timestamp=row["timestamp"],
+        )
+
+        score, reasons = calculate_risk(transaction)
+
+        data = transaction.model_dump()
+        data["risk_score"] = score
+        data["reasons"] = reasons
+        data["status"] = "Pending"
+        data["created_at"] = transaction.timestamp
+
+        try:
+            transactions.insert_one(data)
+            imported += 1
+        except DuplicateKeyError:
+            duplicates += 1
+
+    return {
+        "imported": imported,
+        "duplicates": duplicates,
     }
