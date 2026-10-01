@@ -17,6 +17,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 app = FastAPI(title="BankGuard AML")
 
+HIGH_RISK_THRESHOLD = 50
+
+
+def initial_status(risk_score: int) -> str:
+    """Assign an investigation status to a newly created transaction."""
+    if risk_score >= HIGH_RISK_THRESHOLD:
+        return "Under Review"
+    return "Pending"
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -38,6 +47,7 @@ def create_transaction(transaction: Transaction):
     data = transaction.model_dump()
     data["risk_score"] = score
     data["reasons"] = reasons
+    data["status"] = initial_status(score)
 
     try:
         result = transactions.insert_one(data)
@@ -64,6 +74,7 @@ def create_transactions_bulk(transactions_list: List[Transaction]):
         data = transaction.model_dump()
         data["risk_score"] = score
         data["reasons"] = reasons
+        data["status"] = initial_status(score)
 
         try:
             result = transactions.insert_one(data)
@@ -213,7 +224,7 @@ async def import_transactions(file: UploadFile = File(...)):
         data = transaction.model_dump()
         data["risk_score"] = score
         data["reasons"] = reasons
-        data["status"] = "Pending"
+        data["status"] = initial_status(score)
         data["created_at"] = transaction.timestamp
 
         try:
