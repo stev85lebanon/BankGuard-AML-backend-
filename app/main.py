@@ -5,9 +5,9 @@ from pymongo.errors import DuplicateKeyError
 from fastapi import UploadFile, File
 import csv
 from io import StringIO
-from app.models import RiskRules, Transaction
+from app.models import CaseCreate, CaseNoteCreate, CaseStatusUpdate, RiskRules, Transaction
 from app.risk_engine import calculate_risk, get_risk_rules
-from app.database import imports, risk_settings, transactions
+from app.database import cases, imports, risk_settings, transactions
 from typing import Optional
 from fastapi import Query
 from fastapi import HTTPException
@@ -27,6 +27,11 @@ def initial_status(risk_score: int) -> str:
     if risk_score >= HIGH_RISK_THRESHOLD:
         return "Under Review"
     return "Pending"
+
+
+def serialize_case(case):
+    case["_id"] = str(case["_id"])
+    return case
 
 app.add_middleware(
     CORSMiddleware,
@@ -277,6 +282,106 @@ def update_settings_risk_rules(rules: RiskRules):
         upsert=True,
     )
     return data
+
+
+@app.get("/cases")
+def get_cases():
+    return {"cases": [serialize_case(case) for case in cases.find().sort("created_at", -1)]}
+
+
+@app.post("/cases")
+def create_case(case_request: CaseCreate):
+    transaction = transactions.find_one(
+        {"transaction_id": case_request.transaction_id}
+    )
+    if not transaction:
+        raise HTTPException(status_code=404, detail="Transaction not found.")
+
+    existing_case = cases.find_one(
+        {
+            "transaction_id": case_request.transaction_id,
+            "status": {"$ne": "Resolved"},
+        }
+    )
+    if existing_case:
+        existing_case = serialize_case(existing_case)
+        existing_case["already_exists"] = True
+        return existing_case
+
+    now = datetime.utcnow()
+    new_case = {
+        "transaction_id": transaction["transaction_id"],
+        "customer_id": transaction["customer_id"],
+        "amount": transaction["amount"],
+        "country": transaction["country"],
+        "merchant": transaction["merchant"],
+        "risk_score": transaction.get("risk_score", 0),
+        "reasons": transaction.get("reasons", []),
+        "transaction_timestamp": transaction["timestamp"],
+        "status": "Open",
+        "notes": [],
+        "resolution": "",
+        "created_at": now,
+        "updated_at": now,
+    }
+    result = cases.insert_one(new_case)
+    new_case["_id"] = str(result.inserted_id)
+    return new_case
+
+
+@app.post("/cases/{case_id}/notes")
+def add_case_note(case_id: str, note_request: CaseNoteCreate):
+    try:
+        object_id = ObjectId(case_id)
+    except InvalidId:
+        raise HTTPException(status_code=400, detail="Invalid case ID.")
+
+    note_text = note_request.note.strip()
+    if not note_text:
+        raise HTTPException(status_code=422, detail="A note cannot be empty.")
+
+    result = cases.update_one(
+        {"_id": object_id},
+        {
+            "$push": {"notes": {"text": note_text, "created_at": datetime.utcnow()}},
+            "$set": {"updated_at": datetime.utcnow()},
+        },
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Case not found.")
+
+    return serialize_case(cases.find_one({"_id": object_id}))
+
+
+@app.patch("/cases/{case_id}")
+def update_case(case_id: str, update: CaseStatusUpdate):
+    try:
+        object_id = ObjectId(case_id)
+    except InvalidId:
+        raise HTTPException(status_code=400, detail="Invalid case ID.")
+
+    if update.status == "Resolved" and not update.resolution.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="Add a resolution summary before resolving the case.",
+        )
+
+    result = cases.update_one(
+        {"_id": object_id},
+        {
+            "$set": {
+                "status": update.status,
+                "resolution": (
+                    update.resolution.strip() if update.status == "Resolved" else ""
+                ),
+                "updated_at": datetime.utcnow(),
+            }
+        },
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Case not found.")
+
+    return serialize_case(cases.find_one({"_id": object_id}))
 
 
 @app.delete("/imports/{import_id}")

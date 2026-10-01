@@ -13,3 +13,4 @@ transactions = db.transactions
 transactions.create_index("transaction_id", unique=True)
 imports = db["imports"]
 risk_settings = db["settings"]
+cases = db["cases"]

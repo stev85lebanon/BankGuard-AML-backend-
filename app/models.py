@@ -48,3 +48,16 @@ class RiskRules(BaseModel):
                 "The above-normal amount threshold must be lower than the large transaction threshold."
             )
         return self
+
+
+class CaseCreate(BaseModel):
+    transaction_id: str
+
+
+class CaseNoteCreate(BaseModel):
+    note: str = Field(min_length=1, max_length=2000)
+
+
+class CaseStatusUpdate(BaseModel):
+    status: Literal["Open", "Investigating", "Resolved"]
+    resolution: str = Field(default="", max_length=4000)
