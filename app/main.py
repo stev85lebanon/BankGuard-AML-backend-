@@ -247,3 +247,13 @@ async def import_transactions(file: UploadFile = File(...)):
         "imported": imported,
         "duplicates": duplicates,
     }
+@app.get("/imports")
+def get_import_history():
+
+    history = []
+
+    for item in imports.find().sort("created_at", -1):
+        item["_id"] = str(item["_id"])
+        history.append(item)
+
+    return {"imports": history}
