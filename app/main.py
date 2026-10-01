@@ -15,6 +15,8 @@ from fastapi import HTTPException
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
+from bson import ObjectId
+from bson.errors import InvalidId
 app = FastAPI(title="BankGuard AML")
 
 HIGH_RISK_THRESHOLD = 50
@@ -257,3 +259,17 @@ def get_import_history():
         history.append(item)
 
     return {"imports": history}
+
+
+@app.delete("/imports/{import_id}")
+def delete_import_history(import_id: str):
+    try:
+        object_id = ObjectId(import_id)
+    except InvalidId:
+        raise HTTPException(status_code=400, detail="Invalid import history ID.")
+
+    result = imports.delete_one({"_id": object_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Import history record not found.")
+
+    return {"message": "Import history record deleted successfully."}
