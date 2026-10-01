@@ -5,9 +5,9 @@ from pymongo.errors import DuplicateKeyError
 from fastapi import UploadFile, File
 import csv
 from io import StringIO
-from app.models import Transaction
-from app.risk_engine import calculate_risk
-from app.database import transactions,imports
+from app.models import RiskRules, Transaction
+from app.risk_engine import calculate_risk, get_risk_rules
+from app.database import imports, risk_settings, transactions
 from typing import Optional
 from fastapi import Query
 from fastapi import HTTPException
@@ -44,7 +44,7 @@ app.add_middleware(
 @app.post("/transactions", status_code=status.HTTP_201_CREATED)
 def create_transaction(transaction: Transaction):
 
-    score, reasons = calculate_risk(transaction)
+    score, reasons = calculate_risk(transaction, get_risk_rules())
 
     data = transaction.model_dump()
     data["risk_score"] = score
@@ -68,10 +68,11 @@ def create_transaction(transaction: Transaction):
 def create_transactions_bulk(transactions_list: List[Transaction]):
 
     inserted = []
+    risk_rules = get_risk_rules()
 
     for transaction in transactions_list:
 
-        score, reasons = calculate_risk(transaction)
+        score, reasons = calculate_risk(transaction, risk_rules)
 
         data = transaction.model_dump()
         data["risk_score"] = score
@@ -145,7 +146,7 @@ def update_transaction(transaction_id: str, transaction: Transaction):
             detail="Transaction not found."
         )
 
-    score, reasons = calculate_risk(transaction)
+    score, reasons = calculate_risk(transaction, get_risk_rules())
 
     updated = transaction.model_dump()
     updated["risk_score"] = score
@@ -210,6 +211,7 @@ async def import_transactions(file: UploadFile = File(...)):
 
     imported = 0
     duplicates = 0
+    risk_rules = get_risk_rules()
 
     for row in reader:
         transaction = Transaction(
@@ -221,7 +223,7 @@ async def import_transactions(file: UploadFile = File(...)):
             timestamp=row["timestamp"],
         )
 
-        score, reasons = calculate_risk(transaction)
+        score, reasons = calculate_risk(transaction, risk_rules)
 
         data = transaction.model_dump()
         data["risk_score"] = score
@@ -259,6 +261,22 @@ def get_import_history():
         history.append(item)
 
     return {"imports": history}
+
+
+@app.get("/settings/risk-rules")
+def get_settings_risk_rules():
+    return get_risk_rules().model_dump()
+
+
+@app.put("/settings/risk-rules")
+def update_settings_risk_rules(rules: RiskRules):
+    data = rules.model_dump()
+    risk_settings.replace_one(
+        {"_id": "risk_rules"},
+        {"_id": "risk_rules", **data},
+        upsert=True,
+    )
+    return data
 
 
 @app.delete("/imports/{import_id}")
